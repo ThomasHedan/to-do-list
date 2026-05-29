@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TASK TERMINAL</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap" rel="stylesheet" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          amber: { DEFAULT: '#FFB300', deep: '#FF8C00', dim: '#7a5a12' },
+          term: { black: '#000000', panel: '#0a0a0a', line: '#1c1c1c', line2: '#262626', done: '#444444', ghost: '#1d1d1d' },
+        },
+        fontFamily: { mono: ['"JetBrains Mono"', 'ui-monospace', 'Courier New', 'monospace'] },
+      },
+    },
+  };
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: #000000;
+    color: #FFB300;
+    font-family: "JetBrains Mono", monospace;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { height: 100vh; }
+
+  /* selection */
+  ::selection { background: #FFB300; color: #000; }
+
+  /* scrollbars — thin terminal style */
+  .term-scroll::-webkit-scrollbar { width: 8px; }
+  .term-scroll::-webkit-scrollbar-track { background: #000; }
+  .term-scroll::-webkit-scrollbar-thumb { background: #262626; }
+  .term-scroll::-webkit-scrollbar-thumb:hover { background: #FF8C00; }
+  .term-scroll { scrollbar-width: thin; scrollbar-color: #262626 #000; }
+
+  /* ===== blinking cursor ===== */
+  @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  .cursor-blink { animation: blink 1.06s steps(1) infinite; }
+
+  /* ===== scanline overlay ===== */
+  .scanlines::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(255, 179, 0, 0.035) 0px,
+      rgba(255, 179, 0, 0.035) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    pointer-events: none;
+    z-index: 60;
+    mix-blend-mode: screen;
+  }
+  .scanlines::after {
+    /* faint moving sweep */
+    content: "";
+    position: absolute; left: 0; right: 0; height: 140px;
+    background: linear-gradient(to bottom, transparent, rgba(255,140,0,0.04), transparent);
+    pointer-events: none;
+    z-index: 61;
+    animation: sweep 7.5s linear infinite;
+  }
+  @keyframes sweep { 0% { top: -140px; } 100% { top: 100%; } }
+
+  /* ===== vignette ===== */
+  .vignette::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 55;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  /* ===== background scrolling quotes ===== */
+  @keyframes driftUp { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+  @keyframes driftDown { from { transform: translateY(-50%); } to { transform: translateY(0); } }
+  .drift-up { animation: driftUp 175s linear infinite; }
+  .drift-down { animation: driftDown 215s linear infinite; }
+
+  /* ===== horizontal ticker ===== */
+  @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .ticker-track { display: inline-flex; flex-wrap: nowrap; white-space: nowrap; animation: ticker 80s linear infinite; }
+  .ticker-track:hover { animation-play-state: paused; }
+
+  /* ===== pomodoro pulse ===== */
+  @keyframes pomoFlash { 0%, 100% { background: transparent; } 50% { background: rgba(255,140,0,0.18); } }
+  .pomo-flash { animation: pomoFlash 0.6s ease-out 3; }
+
+  /* ===== task row enter ===== */
+  @keyframes rowIn {
+    from { opacity: 0; transform: translateX(-6px); background: rgba(255,179,0,0.10); }
+    to   { opacity: 1; transform: translateX(0); background: transparent; }
+  }
+  .row-in { animation: rowIn 0.32s ease-out; }
+
+  /* ===== task row leave ===== */
+  @keyframes rowOut {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(14px); }
+  }
+  .row-out { animation: rowOut 0.26s ease-in forwards; }
+
+  /* ===== strike sweep ===== */
+  @keyframes strikeIn { from { width: 0; } to { width: 100%; } }
+
+  /* boot flicker (modal intro only — keyframes kept for reuse) */
+  @keyframes boot { 0% { opacity: 0; } 8% { opacity: 0.4; } 12% { opacity: 0.1; } 20% { opacity: 1; } 100% { opacity: 1; } }
+  /* main frame must always stay visible (never depend on an animation that can freeze at 0%) */
+  .boot { opacity: 1; }
+
+  .glow { text-shadow: 0 0 6px rgba(255,179,0,0.35); }
+  .glow-deep { text-shadow: 0 0 8px rgba(255,140,0,0.45); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/tsx" id="app-src">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ----------------------------------------------------------------------------
+// types
+// ----------------------------------------------------------------------------
+type Lane = "pro" | "perso";
+type View = "pro" | "split" | "perso";
+// a focusable zone inside a lane: the pomodoro, a task row, or the input bar
+type Kind = "pomo" | "task" | "input";
+interface Sel { lane: Lane; kind: Kind; ti: number; } // ti = task index (only when kind === "task")
+
+// map a selection to its vertical position within a lane (0 = pomo, 1..len = tasks, len+1 = input)
+function selToPos(kind: Kind, ti: number, len: number): number {
+  if (kind === "pomo") return 0;
+  if (kind === "input") return len + 1;
+  return ti + 1;
+}
+// inverse of selToPos, clamped into range
+function posToSel(lane: Lane, pos: number, len: number): Sel {
+  if (pos <= 0) return { lane, kind: "pomo", ti: 0 };
+  if (pos >= len + 1) return { lane, kind: "input", ti: 0 };
+  return { lane, kind: "task", ti: pos - 1 };
+}
+// re-anchor a selection onto a (possibly different) lane, keeping the same kind when possible
+function resolveSel(lane: Lane, kind: Kind, ti: number, len: number): Sel {
+  if (kind === "task") {
+    if (len === 0) return { lane, kind: "input", ti: 0 };
+    return { lane, kind: "task", ti: Math.min(ti, len - 1) };
+  }
+  return { lane, kind, ti: 0 };
+}
+
+interface Task {
+  id: string;
+  text: string;
+  done: boolean;
+  est?: number; // estimated minutes
+  leaving?: boolean;
+}
+
+// minutes -> "1h25m" / "45m"
+function fmtMins(m: number): string {
+  if (!m || m <= 0) return "—";
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  if (h > 0) return `${h}h${mm > 0 ? pad(mm) : ""}`;
+  return `${mm}m`;
+}
+
+// ----------------------------------------------------------------------------
+// background watermark quotes (purely decorative)
+// ----------------------------------------------------------------------------
+const SPECIAL_QUOTE = "Qui ose gagne";
+const QUOTES: string[] = [
+  "DISCIPLINE EQUALS FREEDOM",
+  "WHAT GETS MEASURED GETS MANAGED",
+  "DONE IS BETTER THAN PERFECT",
+  "THE OBSTACLE IS THE WAY",
+  SPECIAL_QUOTE,
+  "SLOW IS SMOOTH — SMOOTH IS FAST",
+  "FOCUS ON THE NEXT ACTION",
+  "PROGRESS OVER PERFECTION",
+  "EAT THE FROG FIRST",
+  "MAKE IT WORK THEN MAKE IT BETTER",
+  "SMALL HINGES SWING BIG DOORS",
+  "ACTION CURES FEAR",
+  "ONE TASK AT A TIME",
+  "ENERGY FLOWS WHERE ATTENTION GOES",
+  "THE WORK IS THE REWARD",
+  "SHIP IT",
+  "CLARITY COMES FROM ENGAGEMENT",
+  "MOTION IS NOT PROGRESS",
+  "FINISH WHAT YOU START",
+  "TODAY NOT SOMEDAY",
+  "EXECUTE THE PLAN",
+];
+
+function BackgroundQuotes() {
+  // build two staggered columns of repeated quotes for parallax-ish texture
+  const colA = [...QUOTES, ...QUOTES];
+  const colB = [...QUOTES.slice(10), ...QUOTES.slice(0, 10), ...QUOTES.slice(10), ...QUOTES.slice(0, 10)];
+  const rotate = (i: number) => `rotate(${((i * 37) % 5) - 2}deg)`;
+  const op = (i: number) => 0.55 + ((i * 13) % 50) / 100; // varies "watermark" intensity
+  const isSpecial = (q: string) => q === SPECIAL_QUOTE;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none">
+      <div className="absolute left-[2%] top-0 w-[46%] drift-up">
+        {colA.map((q, i) => (
+          <div key={"a" + i}
+            className="py-12 text-3xl md:text-5xl font-extrabold tracking-tighter leading-none"
+            style={
+              isSpecial(q)
+                ? { color: "#FF8C00", opacity: 0.3, transform: rotate(i) }
+                : { color: "#1d1d1d", opacity: op(i), transform: rotate(i) }
+            }>
+            {q}
+          </div>
+        ))}
+      </div>
+      <div className="absolute right-[2%] top-0 w-[46%] text-right drift-down">
+        {colB.map((q, i) => (
+          <div key={"b" + i}
+            className="py-14 text-3xl md:text-5xl font-extrabold tracking-tighter leading-none"
+            style={
+              isSpecial(q)
+                ? { color: "#FF8C00", opacity: 0.3, transform: rotate(i + 1) }
+                : { color: "#191919", opacity: op(i + 3), transform: rotate(i + 1) }
+            }>
+            {q}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// live clock
+// ----------------------------------------------------------------------------
+function useClock() {
+  const [now, setNow] = useState<Date>(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+const pad = (n: number) => String(n).padStart(2, "0");
+const fmtTime = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+const fmtDate = (d: Date) =>
+  `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+
+// ----------------------------------------------------------------------------
+// persistence
+// ----------------------------------------------------------------------------
+const STORE_KEY = "task-terminal-v1";
+const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
+
+function loadStore(): { pro: Task[]; perso: Task[]; view: View } {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return {
+    view: "split",
+    pro: [
+      { id: uid(), text: "Reconcile Q2 P&L statement", done: true, est: 45 },
+      { id: uid(), text: "Draft term sheet — Acme deal", done: false, est: 60 },
+      { id: uid(), text: "Review pull request #4471", done: false, est: 25 },
+      { id: uid(), text: "Sync w/ ops on settlement bug", done: true, est: 30 },
+      { id: uid(), text: "Ship pricing model v3", done: false, est: 90 },
+    ],
+    perso: [
+      { id: uid(), text: "Book dentist appointment", done: false, est: 10 },
+      { id: uid(), text: "Renew gym membership", done: true, est: 15 },
+      { id: uid(), text: "Call mom — birthday plan", done: false, est: 20 },
+      { id: uid(), text: "Pick up dry cleaning", done: false, est: 15 },
+    ],
+  };
+}
+
+// ----------------------------------------------------------------------------
+// view toggle
+// ----------------------------------------------------------------------------
+function ViewToggle({ view, setView }: { view: View; setView: (v: View) => void }) {
+  const opts: { id: View; label: string }[] = [
+    { id: "pro", label: "PRO" },
+    { id: "split", label: "SPLIT" },
+    { id: "perso", label: "PERSO" },
+  ];
+  return (
+    <div className="flex items-stretch border border-term-line2 bg-black">
+      {opts.map((o, i) => {
+        const active = view === o.id;
+        return (
+          <button
+            key={o.id}
+            onClick={() => setView(o.id)}
+            className={
+              "px-3 md:px-4 py-1.5 text-[11px] md:text-xs font-bold tracking-[0.18em] transition-colors duration-100 outline-none " +
+              (i > 0 ? "border-l border-term-line2 " : "") +
+              (active
+                ? "bg-amber text-black glow"
+                : "text-amber-dim hover:text-amber hover:bg-[#140e02]")
+            }
+          >
+            {active ? "▸ " : "  "}{o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// pomodoro timer (one per lane)
+// ----------------------------------------------------------------------------
+const WORK_SECS = 25 * 60;
+const BREAK_SECS = 5 * 60;
+
+function Pomodoro({ lane, cmd, focused }: { lane: Lane; cmd: number; focused: boolean }) {
+  const [mode, setMode] = useState<"work" | "break">("work");
+  const [secs, setSecs] = useState<number>(WORK_SECS);
+  const [running, setRunning] = useState(false);
+  const [cycles, setCycles] = useState(0);
+  const [flash, setFlash] = useState(false);
+
+  // keyboard "activate" on the pomo zone -> toggle start/pause
+  const firstCmd = useRef(true);
+  useEffect(() => {
+    if (firstCmd.current) { firstCmd.current = false; return; }
+    setRunning((r) => !r);
+  }, [cmd]);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => {
+      setSecs((s) => {
+        if (s <= 1) {
+          // switch mode, keep running
+          setMode((m) => {
+            const next = m === "work" ? "break" : "work";
+            if (m === "work") setCycles((c) => c + 1);
+            return next;
+          });
+          setFlash(true);
+          setTimeout(() => setFlash(false), 1900);
+          return mode === "work" ? BREAK_SECS : WORK_SECS;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [running, mode]);
+
+  const reset = () => {
+    setRunning(false);
+    setMode("work");
+    setSecs(WORK_SECS);
+  };
+  const switchMode = () => {
+    const next = mode === "work" ? "break" : "work";
+    setMode(next);
+    setSecs(next === "work" ? WORK_SECS : BREAK_SECS);
+    setRunning(false);
+  };
+
+  const mm = pad(Math.floor(secs / 60));
+  const ss = pad(secs % 60);
+  const isBreak = mode === "break";
+
+  return (
+    <div
+      className={
+        "flex items-center gap-2 border-t px-3 py-1.5 transition-colors " +
+        (focused ? "border-amber bg-[#140e02] " : "border-term-line ") +
+        (flash ? "pomo-flash " : "") +
+        (isBreak && !focused ? "bg-[#05070a]" : (!focused ? "bg-[#070502]" : ""))
+      }
+    >
+      <button
+        onClick={switchMode}
+        className={
+          "shrink-0 px-1.5 py-0.5 text-[10px] font-bold tracking-[0.18em] border transition-colors " +
+          (isBreak
+            ? "border-[#2a4a5a] text-[#5a8aa0] hover:bg-[#0c1a22]"
+            : "border-term-line2 text-amber-deep hover:bg-[#140e02]")
+        }
+        title="switch work / break"
+      >
+        {isBreak ? "BREAK" : "WORK"}
+      </button>
+
+      <span
+        className={
+          "tabular-nums text-base font-bold tracking-wider " +
+          (isBreak ? "text-[#6aa0b8]" : "text-amber glow") +
+          (running ? "" : " opacity-80")
+        }
+      >
+        {mm}:{ss}
+      </span>
+
+      <div className="ml-auto flex items-center gap-1.5">
+        <span className="text-[10px] tracking-widest text-term-done tabular-nums">×{cycles}</span>
+        <button
+          onClick={() => setRunning((r) => !r)}
+          className="border border-term-line2 px-2 py-0.5 text-[10px] font-bold tracking-widest text-amber-dim hover:border-amber hover:bg-amber hover:text-black transition-colors"
+        >
+          {running ? "❚❚ PAUSE" : "▸ START"}
+        </button>
+        <button
+          onClick={reset}
+          className="border border-term-line2 px-1.5 py-0.5 text-[10px] font-bold text-amber-dim hover:border-amber-deep hover:text-amber-deep transition-colors"
+          title="reset"
+        >
+          ↺
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// task row
+// ----------------------------------------------------------------------------
+function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect }: {
+  task: Task; index: number; rowId: string; selected: boolean;
+  onToggle: () => void; onDelete: () => void; onSelect: () => void;
+}) {
+  return (
+    <div
+      id={rowId}
+      onClick={onSelect}
+      className={
+        "group grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-x-2.5 px-3 py-[7px] " +
+        "border-b text-[13px] md:text-sm leading-tight cursor-default transition-colors duration-75 " +
+        (selected
+          ? "bg-[#1c1300] border-amber-deep/40 "
+          : "border-term-line hover:bg-[#0d0a02] ") +
+        (task.leaving ? "row-out" : "row-in")
+      }
+    >
+      {/* index / selection marker */}
+      <span className={"tabular-nums text-xs select-none " + (selected ? "text-amber glow" : "text-term-done")}>
+        {selected ? "▸" : pad(index + 1)}
+      </span>
+
+      {/* checkbox — CSS-drawn square */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        className="flex items-center justify-center outline-none"
+        aria-label={task.done ? "mark incomplete" : "mark complete"}
+      >
+        <span
+          className={
+            "inline-flex h-[14px] w-[14px] items-center justify-center border transition-colors " +
+            (task.done
+              ? "border-amber-deep bg-amber-deep"
+              : "border-amber-dim bg-transparent hover:border-amber")
+          }
+        >
+          {task.done && <span className="h-[6px] w-[6px] bg-black"></span>}
+        </span>
+      </button>
+
+      {/* text */}
+      <span className="min-w-0 relative">
+        <span
+          className={
+            "block truncate align-baseline " +
+            (task.done ? "text-term-done" : "text-amber glow")
+          }
+        >
+          {task.text}
+        </span>
+        {task.done && (
+          <span
+            className="pointer-events-none absolute left-0 top-1/2 h-px bg-term-done"
+            style={{ animation: "strikeIn 0.3s ease-out forwards" }}
+          />
+        )}
+      </span>
+
+      {/* estimate */}
+      <span
+        className={
+          "justify-self-end tabular-nums text-[11px] tracking-wide whitespace-nowrap select-none " +
+          (task.done ? "text-term-line2" : "text-amber-dim")
+        }
+        title="estimated time"
+      >
+        {task.est ? fmtMins(task.est) : ""}
+      </span>
+
+      {/* delete */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        className="justify-self-end text-term-line2 opacity-0 group-hover:opacity-100 hover:text-amber-deep transition-all duration-100 text-xs font-bold leading-none px-1"
+        aria-label="delete task"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// column
+// ----------------------------------------------------------------------------
+function Column({ lane, label, tasks, selectedIndex, focusZone, pomoCmd, onAdd, onToggle, onDelete, onSelect, onSelectZone }: {
+  lane: Lane; label: string; tasks: Task[]; selectedIndex: number | null;
+  focusZone: Kind | null; pomoCmd: number;
+  onAdd: (text: string, est: number) => void; onToggle: (id: string) => void;
+  onDelete: (id: string) => void; onSelect: (index: number) => void;
+  onSelectZone: (kind: Kind) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [estDraft, setEstDraft] = useState("");
+  const [focused, setFocused] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const remaining = tasks.filter((t) => !t.done).length;
+  const total = tasks.length;
+  const done = total - remaining;
+  const estLeft = tasks.filter((t) => !t.done).reduce((sum, t) => sum + (t.est || 0), 0);
+
+  const submit = () => {
+    const v = draft.trim();
+    if (!v) return;
+    const e = Math.max(0, parseInt(estDraft, 10) || 0);
+    onAdd(v, e);
+    setDraft("");
+    setEstDraft("");
+    requestAnimationFrame(() => {
+      if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+    });
+  };
+
+  // progress bar text
+  const barLen = 14;
+  const filled = total === 0 ? 0 : Math.round((done / total) * barLen);
+  const bar = "█".repeat(filled) + "░".repeat(barLen - filled);
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+
+  return (
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-term-black/60">
+      {/* header */}
+      <div className="shrink-0 border-b-2 border-term-line2 bg-black">
+        <div className="px-3 py-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-base md:text-lg font-extrabold tracking-[0.25em] text-amber glow">
+              [ {label} ]
+            </span>
+            <span className="text-xs md:text-sm font-bold tabular-nums text-amber-deep glow-deep">
+              {done}/{total} TASKS
+            </span>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between gap-3">
+            <span className="text-[11px] tracking-widest text-amber-dim tabular-nums whitespace-nowrap">
+              {bar} {pad(pct)}%
+            </span>
+            <span className="text-[11px] tracking-widest text-amber-dim tabular-nums whitespace-nowrap">
+              {remaining} OPEN · ETA {fmtMins(estLeft)}
+            </span>
+          </div>
+        </div>
+        {/* pomodoro */}
+        <Pomodoro lane={lane} cmd={pomoCmd} focused={focusZone === "pomo"} />
+      </div>
+
+      {/* list */}
+      <div ref={listRef} className="term-scroll min-h-0 flex-1 overflow-y-auto">
+        {tasks.length === 0 ? (
+          <div className="px-3 py-6 text-xs tracking-widest text-term-line2">
+            &gt; NO TASKS. QUEUE EMPTY.
+          </div>
+        ) : (
+          tasks.map((t, i) => (
+            <TaskRow
+              key={t.id}
+              task={t}
+              index={i}
+              rowId={"row-" + lane + "-" + i}
+              selected={selectedIndex === i}
+              onToggle={() => onToggle(t.id)}
+              onDelete={() => onDelete(t.id)}
+              onSelect={() => onSelect(i)}
+            />
+          ))
+        )}
+      </div>
+
+      {/* input */}
+      <div
+        className={
+          "shrink-0 border-t-2 bg-black transition-colors " +
+          (focused || focusZone === "input" ? "border-amber" : "border-term-line2")
+        }
+      >
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          <span className={"font-bold " + (focused || focusZone === "input" ? "text-amber glow" : "text-amber-dim")}>
+            {lane === "pro" ? "PRO>" : "PSL>"}
+          </span>
+          <input
+            id={"task-input-" + lane}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            onFocus={() => { setFocused(true); onSelectZone("input"); }}
+            onBlur={() => setFocused(false)}
+            placeholder="new entry…"
+            spellCheck={false}
+            autoComplete="off"
+            className="min-w-0 flex-1 bg-transparent text-sm text-amber placeholder:text-term-line2 outline-none glow"
+            style={{ caretColor: "transparent" }}
+          />
+          <span className={"font-bold text-amber " + (focused ? "cursor-blink" : "opacity-30")}>█</span>
+
+          {/* estimate field */}
+          <div className="flex items-center border border-term-line2 px-1.5 focus-within:border-amber transition-colors">
+            <input
+              value={estDraft}
+              onChange={(e) => setEstDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              placeholder="--"
+              inputMode="numeric"
+              spellCheck={false}
+              autoComplete="off"
+              className="w-[3.2ch] bg-transparent text-center text-sm tabular-nums text-amber-deep placeholder:text-term-line2 outline-none"
+            />
+            <span className="text-[10px] tracking-widest text-amber-dim select-none">MIN</span>
+          </div>
+
+          <button
+            onClick={submit}
+            className="shrink-0 border border-term-line2 px-2 py-0.5 text-[11px] font-bold tracking-widest text-amber-dim hover:border-amber hover:bg-amber hover:text-black transition-colors"
+          >
+            ADD ↵
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// app
+// ----------------------------------------------------------------------------
+function App() {
+  const init = useRef(loadStore());
+  const [view, setView] = useState<View>(init.current.view);
+  const [pro, setPro] = useState<Task[]>(init.current.pro);
+  const [perso, setPerso] = useState<Task[]>(init.current.perso);
+  const now = useClock();
+  const [sel, setSel] = useState<Sel | null>(null);
+  const [pomoCmd, setPomoCmd] = useState<{ pro: number; perso: number }>({ pro: 0, perso: 0 });
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  // persist
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({ view, pro, perso }));
+    } catch (e) {}
+  }, [view, pro, perso]);
+
+  const setters: Record<Lane, React.Dispatch<React.SetStateAction<Task[]>>> = { pro: setPro, perso: setPerso };
+
+  const addTask = useCallback((lane: Lane, text: string, est: number) => {
+    setters[lane]((prev) => [...prev, { id: uid(), text, done: false, est: est || undefined }]);
+  }, []);
+
+  const toggleTask = useCallback((lane: Lane, id: string) => {
+    setters[lane]((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+  }, []);
+
+  const deleteTask = useCallback((lane: Lane, id: string) => {
+    // flag leaving for exit animation, then remove
+    setters[lane]((prev) => prev.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    setTimeout(() => {
+      setters[lane]((prev) => prev.filter((t) => t.id !== id));
+    }, 250);
+  }, []);
+
+  const doReset = useCallback(() => {
+    setPro([]);
+    setPerso([]);
+    setSel(null);
+    setConfirmReset(false);
+  }, []);
+
+  // keep selection valid when lists / view change
+  useEffect(() => {
+    setSel((s) => {
+      if (!s) return s;
+      const visible: Lane[] = view === "split" ? ["pro", "perso"] : [view as Lane];
+      if (!visible.includes(s.lane)) return null;
+      const len = s.lane === "pro" ? pro.length : perso.length;
+      // a task selection that points past the end (or into an empty lane) gets clamped / bumped to input
+      if (s.kind === "task") {
+        if (len === 0) return { lane: s.lane, kind: "input", ti: 0 };
+        if (s.ti > len - 1) return { lane: s.lane, kind: "task", ti: len - 1 };
+      }
+      return s;
+    });
+  }, [pro, perso, view]);
+
+  // scroll selected task row into view (no scrollIntoView)
+  useEffect(() => {
+    if (!sel || sel.kind !== "task") return;
+    const el = document.getElementById("row-" + sel.lane + "-" + sel.ti);
+    if (!el) return;
+    const cont = el.closest(".term-scroll") as HTMLElement | null;
+    if (!cont) return;
+    const er = el.getBoundingClientRect();
+    const cr = cont.getBoundingClientRect();
+    if (er.top < cr.top) cont.scrollTop -= (cr.top - er.top) + 8;
+    else if (er.bottom > cr.bottom) cont.scrollTop += (er.bottom - cr.bottom) + 8;
+  }, [sel]);
+
+  // ===== keyboard navigation =====
+  useEffect(() => {
+    const visible: Lane[] = [];
+    if (view === "pro" || view === "split") visible.push("pro");
+    if (view === "perso" || view === "split") visible.push("perso");
+
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+
+      // confirmation modal owns the keyboard while open
+      if (confirmReset) {
+        if (e.key === "Escape" || e.key.toLowerCase() === "n") { e.preventDefault(); setConfirmReset(false); }
+        else if (e.key === "Enter" || e.key.toLowerCase() === "y") { e.preventDefault(); doReset(); }
+        return;
+      }
+
+      if (typing) {
+        if (e.key === "Escape") el.blur();
+        return;
+      }
+
+      const curLane: Lane = sel && visible.includes(sel.lane) ? sel.lane : visible[0];
+      const list = curLane === "pro" ? pro : perso;
+      const len = list.length;
+      const onButton = el && el.tagName === "BUTTON";
+      // current selection re-anchored onto the active lane (defaults to its pomo zone)
+      const cur: Sel = sel && visible.includes(sel.lane) ? sel : { lane: curLane, kind: "pomo", ti: 0 };
+
+      switch (e.key) {
+        case "ArrowDown": {
+          e.preventDefault();
+          const pos = selToPos(cur.kind, cur.ti, len);
+          setSel(posToSel(curLane, Math.min(len + 1, pos + 1), len));
+          break;
+        }
+        case "ArrowUp": {
+          e.preventDefault();
+          const pos = selToPos(cur.kind, cur.ti, len);
+          setSel(posToSel(curLane, Math.max(0, pos - 1), len));
+          break;
+        }
+        case "ArrowLeft":
+        case "ArrowRight":
+          e.preventDefault();
+          if (visible.length === 2) {
+            // split view: jump to the other lane, keeping the same zone where possible
+            const target: Lane = e.key === "ArrowLeft" ? "pro" : "perso";
+            const tlen = (target === "pro" ? pro : perso).length;
+            setSel(resolveSel(target, cur.kind, cur.ti, tlen));
+          } else {
+            const order: View[] = ["pro", "split", "perso"];
+            const i = order.indexOf(view);
+            setView(order[e.key === "ArrowRight" ? Math.min(2, i + 1) : Math.max(0, i - 1)]);
+          }
+          break;
+        case " ":
+        case "Enter": {
+          if (onButton) break;
+          e.preventDefault();
+          if (cur.kind === "pomo") {
+            // toggle the lane's pomodoro start/pause
+            setPomoCmd((c) => ({ ...c, [curLane]: c[curLane] + 1 }));
+          } else if (cur.kind === "input") {
+            // hand focus to the text field so the user can type
+            const inp = document.getElementById("task-input-" + curLane) as HTMLInputElement | null;
+            inp && inp.focus();
+          } else {
+            const t = list[cur.ti];
+            if (t) toggleTask(curLane, t.id);
+          }
+          break;
+        }
+        case "Delete":
+        case "Backspace": {
+          if (cur.kind === "task") {
+            const t = list[cur.ti];
+            if (t) { e.preventDefault(); deleteTask(curLane, t.id); }
+          }
+          break;
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view, pro, perso, sel, confirmReset, doReset, toggleTask, deleteTask]);
+
+  const totalOpen = pro.filter((t) => !t.done).length + perso.filter((t) => !t.done).length;
+  const totalAll = pro.length + perso.length;
+
+  const showPro = view === "pro" || view === "split";
+  const showPerso = view === "perso" || view === "split";
+
+  const proCol = (
+    <Column
+      lane="pro" label="PRO" tasks={pro}
+      selectedIndex={sel && sel.lane === "pro" && sel.kind === "task" ? sel.ti : null}
+      focusZone={sel && sel.lane === "pro" ? sel.kind : null}
+      pomoCmd={pomoCmd.pro}
+      onAdd={(t, e) => addTask("pro", t, e)}
+      onToggle={(id) => toggleTask("pro", id)}
+      onDelete={(id) => deleteTask("pro", id)}
+      onSelect={(i) => setSel({ lane: "pro", kind: "task", ti: i })}
+      onSelectZone={(k) => setSel({ lane: "pro", kind: k, ti: 0 })}
+    />
+  );
+  const persoCol = (
+    <Column
+      lane="perso" label="PERSO" tasks={perso}
+      selectedIndex={sel && sel.lane === "perso" && sel.kind === "task" ? sel.ti : null}
+      focusZone={sel && sel.lane === "perso" ? sel.kind : null}
+      pomoCmd={pomoCmd.perso}
+      onAdd={(t, e) => addTask("perso", t, e)}
+      onToggle={(id) => toggleTask("perso", id)}
+      onDelete={(id) => deleteTask("perso", id)}
+      onSelect={(i) => setSel({ lane: "perso", kind: "task", ti: i })}
+      onSelectZone={(k) => setSel({ lane: "perso", kind: k, ti: 0 })}
+    />
+  );
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-black scanlines vignette">
+      <BackgroundQuotes />
+
+      {/* foreground frame */}
+      <div className="boot relative z-10 flex h-full flex-col p-2 md:p-3">
+        {/* ===== top bar ===== */}
+        <header className="shrink-0 border-2 border-term-line2 bg-black">
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            {/* left: brand */}
+            <div className="flex items-baseline gap-3 min-w-0">
+              <span className="text-lg md:text-xl font-extrabold tracking-[0.28em] text-amber glow whitespace-nowrap">
+                TASK<span className="text-amber-deep">·</span>TERMINAL
+              </span>
+              <span className="hidden md:inline text-[11px] tracking-widest text-amber-dim whitespace-nowrap">
+                v1.0 · MODE:{view.toUpperCase()}
+              </span>
+            </div>
+
+            {/* center: toggle */}
+            <ViewToggle view={view} setView={setView} />
+
+            {/* right: clock */}
+            <div className="flex items-baseline gap-3 text-right">
+              <span className="hidden sm:inline text-[11px] tracking-widest text-amber-dim tabular-nums whitespace-nowrap">
+                {fmtDate(now)}
+              </span>
+              <span className="text-base md:text-xl font-bold tabular-nums text-amber glow-deep whitespace-nowrap">
+                {fmtTime(now)}
+              </span>
+            </div>
+          </div>
+          {/* status strip */}
+          <div className="flex items-center justify-between gap-2 border-t border-term-line bg-[#070502] px-3 py-1">
+            <span className="text-[10px] md:text-[11px] tracking-[0.2em] text-amber-dim">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-deep align-middle cursor-blink mr-1.5"></span>
+              ONLINE · SESSION ACTIVE
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="hidden sm:inline text-[10px] md:text-[11px] tracking-[0.2em] text-amber-dim tabular-nums">
+                GLOBAL: {totalAll - totalOpen}/{totalAll} CLEARED · {totalOpen} OPEN
+              </span>
+              <button
+                onClick={() => setConfirmReset(true)}
+                className="border border-term-line2 px-2 py-0.5 text-[10px] font-bold tracking-[0.2em] text-amber-dim hover:border-amber-deep hover:bg-amber-deep hover:text-black transition-colors"
+              >
+                ⟲ RESET
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* ===== board ===== */}
+        <main className="mt-2 md:mt-3 flex min-h-0 flex-1 border-2 border-term-line2 bg-black">
+          {showPro && proCol}
+          {view === "split" && <div className="w-[2px] shrink-0 self-stretch bg-term-line2"></div>}
+          {showPerso && persoCol}
+        </main>
+
+        {/* ===== footer hint ===== */}
+        <footer className="shrink-0 flex items-center justify-between px-1 pt-1.5 text-[10px] tracking-[0.18em] text-term-line2">
+          <span>[ ↑↓ ] POMO/TASKS/INPUT &nbsp; [ ←→ ] LANE/VIEW &nbsp; [ ↵ ] ACTIVATE &nbsp; [ ␣ ] TOGGLE &nbsp; [ ⌫ ] DELETE</span>
+          <span className="hidden md:inline">TASK·TERMINAL // LOCAL STORE</span>
+        </footer>
+      </div>
+
+      {/* ===== reset confirmation modal ===== */}
+      {confirmReset && (
+        <div
+          className="absolute inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-[1px]"
+          style={{ animation: "boot 0.25s ease-out" }}
+          onClick={() => setConfirmReset(false)}
+        >
+          <div
+            className="w-[min(440px,90vw)] border-2 border-amber-deep bg-black shadow-[0_0_40px_rgba(255,140,0,0.25)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* title bar */}
+            <div className="flex items-center justify-between border-b-2 border-amber-deep bg-amber-deep px-3 py-1.5">
+              <span className="text-xs font-extrabold tracking-[0.25em] text-black">⚠ SYSTEM PURGE</span>
+              <span className="text-xs font-bold tracking-widest text-black/70">[ESC]</span>
+            </div>
+            {/* body */}
+            <div className="px-5 py-5">
+              <p className="text-sm leading-relaxed text-amber glow">
+                &gt; WARNING: this will <span className="text-amber-deep font-bold">CLEAR ALL TASKS</span>.
+              </p>
+              <p className="mt-2 text-[13px] leading-relaxed text-amber-dim">
+                PRO + PERSO queues will be wiped from local storage.
+                <br />
+                THIS ACTION CANNOT BE UNDONE.
+              </p>
+              <div className="mt-3 text-[13px] tabular-nums text-term-done">
+                &gt; {totalAll} ENTRIES FLAGGED FOR DELETION<span className="cursor-blink">_</span>
+              </div>
+
+              {/* actions */}
+              <div className="mt-5 flex gap-3">
+                <button
+                  onClick={doReset}
+                  className="flex-1 border-2 border-amber-deep bg-amber-deep px-3 py-2 text-sm font-extrabold tracking-[0.2em] text-black hover:bg-amber hover:border-amber transition-colors"
+                >
+                  [Y] CONFIRM PURGE
+                </button>
+                <button
+                  onClick={() => setConfirmReset(false)}
+                  className="flex-1 border-2 border-term-line2 px-3 py-2 text-sm font-extrabold tracking-[0.2em] text-amber-dim hover:border-amber hover:text-amber transition-colors"
+                >
+                  [N] CANCEL
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+</script>
+<script>
+  (function () {
+    var src = document.getElementById("app-src").textContent;
+    var out = Babel.transform(src, {
+      filename: "app.tsx",
+      presets: [
+        ["typescript", { isTSX: true, allExtensions: true, onlyRemoveTypeImports: true }],
+        "react",
+      ],
+    }).code;
+    var s = document.createElement("script");
+    s.textContent = out;
+    document.body.appendChild(s);
+  })();
+</script>
+</body>
+</html>
