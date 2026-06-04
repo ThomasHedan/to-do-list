@@ -455,7 +455,7 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect,
   isDragging: boolean; isDropTarget: boolean; dropPosition: "above" | "below" | null;
 }) {
   const stepsCount = task.steps ? task.steps.length : 0;
-  const stepsDone = task.steps ? task.steps.filter(Boolean).length : 0;
+  const hasSteps = stepsCount > 0;
 
   return (
     <div
@@ -468,7 +468,7 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect,
       onDrop={onDrop}
       onDragEnd={onDragEnd}
       className={
-        "group relative grid grid-cols-[auto_auto_auto_1fr_auto_auto_auto] items-center gap-x-2.5 px-3 py-[7px] " +
+        "group relative grid grid-cols-[auto_auto_1fr_auto_auto_auto] items-center gap-x-2.5 px-3 py-[7px] " +
         "border-b text-[13px] md:text-sm leading-tight cursor-grab active:cursor-grabbing transition-colors duration-75 " +
         (selected
           ? "bg-[#1c1300] border-amber-deep/40 "
@@ -493,47 +493,47 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect,
         {selected ? "▸" : pad(index + 1)}
       </span>
 
-      {/* checkbox — CSS-drawn square */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggle(); }}
-        className="flex items-center justify-center outline-none"
-        aria-label={task.done ? "mark incomplete" : "mark complete"}
-        title={stepsCount > 0 ? `${stepsDone}/${stepsCount} steps — click to toggle all` : (task.done ? "mark incomplete" : "mark complete")}
-      >
-        <span
-          className={
-            "inline-flex h-[14px] w-[14px] items-center justify-center border transition-colors " +
-            (task.done
-              ? "border-amber-deep bg-amber-deep"
-              : "border-amber-dim bg-transparent hover:border-amber")
-          }
-        >
-          {task.done && <span className="h-[6px] w-[6px] bg-black"></span>}
-        </span>
-      </button>
-
-      {/* sub-step checkboxes */}
-      <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        {task.steps && task.steps.map((sd, si) => (
+      {/* checkbox(es) — single main box, or N equal-size boxes when steps exist */}
+      <span className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+        {hasSteps ? (
+          task.steps!.map((sd, si) => (
+            <button
+              key={si}
+              onClick={(e) => { e.stopPropagation(); onToggleStep(si); }}
+              className="flex items-center justify-center outline-none"
+              aria-label={"step " + (si + 1) + " of " + stepsCount}
+              title={"step " + (si + 1) + " / " + stepsCount}
+            >
+              <span
+                className={
+                  "inline-flex h-[14px] w-[14px] items-center justify-center border transition-colors " +
+                  (sd
+                    ? "border-amber-deep bg-amber-deep"
+                    : "border-amber-dim bg-transparent hover:border-amber")
+                }
+              >
+                {sd && <span className="h-[6px] w-[6px] bg-black"></span>}
+              </span>
+            </button>
+          ))
+        ) : (
           <button
-            key={si}
-            onClick={(e) => { e.stopPropagation(); onToggleStep(si); }}
+            onClick={(e) => { e.stopPropagation(); onToggle(); }}
             className="flex items-center justify-center outline-none"
-            aria-label={"step " + (si + 1)}
-            title={"step " + (si + 1)}
+            aria-label={task.done ? "mark incomplete" : "mark complete"}
           >
             <span
               className={
-                "inline-flex h-[10px] w-[10px] items-center justify-center border transition-colors " +
-                (sd
+                "inline-flex h-[14px] w-[14px] items-center justify-center border transition-colors " +
+                (task.done
                   ? "border-amber-deep bg-amber-deep"
                   : "border-amber-dim bg-transparent hover:border-amber")
               }
             >
-              {sd && <span className="h-[4px] w-[4px] bg-black"></span>}
+              {task.done && <span className="h-[6px] w-[6px] bg-black"></span>}
             </span>
           </button>
-        ))}
+        )}
       </span>
 
       {/* text */}
@@ -566,21 +566,21 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect,
       </span>
 
       {/* step controls */}
-      <span className="flex items-center gap-0.5 opacity-50 group-hover:opacity-100 transition-opacity">
+      <span className="flex items-center gap-0.5 opacity-40 group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e) => { e.stopPropagation(); onAddStep(); }}
           className="border border-term-line2 text-amber-dim hover:border-amber hover:text-amber transition-colors text-[10px] font-bold leading-none px-1 py-0.5"
           aria-label="add step"
-          title="add a sub-step checkbox"
+          title="add a checkbox step"
         >
           +□
         </button>
-        {stepsCount > 0 && (
+        {hasSteps && (
           <button
             onClick={(e) => { e.stopPropagation(); onRemoveStep(); }}
             className="border border-term-line2 text-amber-dim hover:border-amber-deep hover:text-amber-deep transition-colors text-[10px] font-bold leading-none px-1 py-0.5"
             aria-label="remove step"
-            title="remove last sub-step"
+            title="remove last checkbox step"
           >
             −□
           </button>
@@ -590,7 +590,7 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect,
       {/* delete */}
       <button
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="justify-self-end border border-amber-deep/40 text-amber-deep hover:bg-amber-deep hover:text-black transition-colors text-xs font-bold leading-none px-1.5 py-0.5"
+        className="justify-self-end text-term-done hover:text-amber-deep transition-colors text-xs font-bold leading-none px-1"
         aria-label="delete task"
         title="delete task"
       >
@@ -835,8 +835,10 @@ function App() {
   const addStep = useCallback((lane: Lane, id: string) => {
     setters[lane]((prev) => prev.map((t) => {
       if (t.id !== id) return t;
-      const steps = [...(t.steps || []), false];
-      // adding a new (incomplete) step means the task is no longer fully done
+      // first add: seed from current `done` so the existing box stays as step 1,
+      // and a fresh unchecked box becomes step 2.
+      const base = t.steps && t.steps.length > 0 ? t.steps : [t.done];
+      const steps = [...base, false];
       return { ...t, steps, done: false };
     }));
   }, []);
@@ -845,8 +847,13 @@ function App() {
     setters[lane]((prev) => prev.map((t) => {
       if (t.id !== id || !t.steps || t.steps.length === 0) return t;
       const steps = t.steps.slice(0, -1);
-      const allDone = steps.length > 0 && steps.every(Boolean);
-      return { ...t, steps, done: steps.length === 0 ? t.done : allDone };
+      // dropping back to one box collapses to the single `done` state
+      if (steps.length <= 1) {
+        const single = steps.length === 1 ? steps[0] : t.done;
+        const { steps: _drop, ...rest } = t;
+        return { ...rest, done: single };
+      }
+      return { ...t, steps, done: steps.every(Boolean) };
     }));
   }, []);
 
