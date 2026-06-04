@@ -170,6 +170,7 @@ interface Task {
   done: boolean;
   est?: number; // estimated minutes
   leaving?: boolean;
+  steps?: boolean[]; // optional sub-step checkboxes
 }
 
 // minutes -> "1h25m" / "45m"
@@ -439,25 +440,56 @@ function Pomodoro({ lane, cmd, focused }: { lane: Lane; cmd: number; focused: bo
 // ----------------------------------------------------------------------------
 // task row
 // ----------------------------------------------------------------------------
-function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect }: {
+function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect,
+  onToggleStep, onAddStep, onRemoveStep,
+  onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
+  isDragging, isDropTarget, dropPosition }: {
   task: Task; index: number; rowId: string; selected: boolean;
   onToggle: () => void; onDelete: () => void; onSelect: () => void;
+  onToggleStep: (i: number) => void; onAddStep: () => void; onRemoveStep: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragEnd: (e: React.DragEvent) => void;
+  isDragging: boolean; isDropTarget: boolean; dropPosition: "above" | "below" | null;
 }) {
+  const stepsCount = task.steps ? task.steps.length : 0;
+  const stepsDone = task.steps ? task.steps.filter(Boolean).length : 0;
+
   return (
     <div
       id={rowId}
+      draggable
       onClick={onSelect}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
       className={
-        "group grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-x-2.5 px-3 py-[7px] " +
-        "border-b text-[13px] md:text-sm leading-tight cursor-default transition-colors duration-75 " +
+        "group relative grid grid-cols-[auto_auto_auto_1fr_auto_auto_auto] items-center gap-x-2.5 px-3 py-[7px] " +
+        "border-b text-[13px] md:text-sm leading-tight cursor-grab active:cursor-grabbing transition-colors duration-75 " +
         (selected
           ? "bg-[#1c1300] border-amber-deep/40 "
           : "border-term-line hover:bg-[#0d0a02] ") +
+        (isDragging ? "opacity-40 " : "") +
         (task.leaving ? "row-out" : "row-in")
       }
     >
-      {/* index / selection marker */}
-      <span className={"tabular-nums text-xs select-none " + (selected ? "text-amber glow" : "text-term-done")}>
+      {/* drop indicator line */}
+      {isDropTarget && dropPosition === "above" && (
+        <span className="pointer-events-none absolute left-0 right-0 -top-px h-[2px] bg-amber glow"></span>
+      )}
+      {isDropTarget && dropPosition === "below" && (
+        <span className="pointer-events-none absolute left-0 right-0 -bottom-px h-[2px] bg-amber glow"></span>
+      )}
+
+      {/* drag handle / index */}
+      <span
+        className={"tabular-nums text-xs select-none " + (selected ? "text-amber glow" : "text-term-done group-hover:text-amber-dim")}
+        title="drag to reorder"
+      >
         {selected ? "▸" : pad(index + 1)}
       </span>
 
@@ -466,6 +498,7 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect }:
         onClick={(e) => { e.stopPropagation(); onToggle(); }}
         className="flex items-center justify-center outline-none"
         aria-label={task.done ? "mark incomplete" : "mark complete"}
+        title={stepsCount > 0 ? `${stepsDone}/${stepsCount} steps — click to toggle all` : (task.done ? "mark incomplete" : "mark complete")}
       >
         <span
           className={
@@ -478,6 +511,30 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect }:
           {task.done && <span className="h-[6px] w-[6px] bg-black"></span>}
         </span>
       </button>
+
+      {/* sub-step checkboxes */}
+      <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        {task.steps && task.steps.map((sd, si) => (
+          <button
+            key={si}
+            onClick={(e) => { e.stopPropagation(); onToggleStep(si); }}
+            className="flex items-center justify-center outline-none"
+            aria-label={"step " + (si + 1)}
+            title={"step " + (si + 1)}
+          >
+            <span
+              className={
+                "inline-flex h-[10px] w-[10px] items-center justify-center border transition-colors " +
+                (sd
+                  ? "border-amber-deep bg-amber-deep"
+                  : "border-amber-dim bg-transparent hover:border-amber")
+              }
+            >
+              {sd && <span className="h-[4px] w-[4px] bg-black"></span>}
+            </span>
+          </button>
+        ))}
+      </span>
 
       {/* text */}
       <span className="min-w-0 relative">
@@ -508,11 +565,34 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect }:
         {task.est ? fmtMins(task.est) : ""}
       </span>
 
+      {/* step controls */}
+      <span className="flex items-center gap-0.5 opacity-50 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e) => { e.stopPropagation(); onAddStep(); }}
+          className="border border-term-line2 text-amber-dim hover:border-amber hover:text-amber transition-colors text-[10px] font-bold leading-none px-1 py-0.5"
+          aria-label="add step"
+          title="add a sub-step checkbox"
+        >
+          +□
+        </button>
+        {stepsCount > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemoveStep(); }}
+            className="border border-term-line2 text-amber-dim hover:border-amber-deep hover:text-amber-deep transition-colors text-[10px] font-bold leading-none px-1 py-0.5"
+            aria-label="remove step"
+            title="remove last sub-step"
+          >
+            −□
+          </button>
+        )}
+      </span>
+
       {/* delete */}
       <button
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="justify-self-end text-term-line2 opacity-0 group-hover:opacity-100 hover:text-amber-deep transition-all duration-100 text-xs font-bold leading-none px-1"
+        className="justify-self-end border border-amber-deep/40 text-amber-deep hover:bg-amber-deep hover:text-black transition-colors text-xs font-bold leading-none px-1.5 py-0.5"
         aria-label="delete task"
+        title="delete task"
       >
         ✕
       </button>
@@ -523,16 +603,24 @@ function TaskRow({ task, index, rowId, selected, onToggle, onDelete, onSelect }:
 // ----------------------------------------------------------------------------
 // column
 // ----------------------------------------------------------------------------
-function Column({ lane, label, tasks, selectedIndex, focusZone, pomoCmd, onAdd, onToggle, onDelete, onSelect, onSelectZone }: {
+function Column({ lane, label, tasks, selectedIndex, focusZone, pomoCmd, onAdd, onToggle, onDelete, onSelect, onSelectZone,
+  onToggleStep, onAddStep, onRemoveStep, onReorder }: {
   lane: Lane; label: string; tasks: Task[]; selectedIndex: number | null;
   focusZone: Kind | null; pomoCmd: number;
   onAdd: (text: string, est: number) => void; onToggle: (id: string) => void;
   onDelete: (id: string) => void; onSelect: (index: number) => void;
   onSelectZone: (kind: Kind) => void;
+  onToggleStep: (id: string, i: number) => void;
+  onAddStep: (id: string) => void;
+  onRemoveStep: (id: string) => void;
+  onReorder: (from: number, to: number) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [estDraft, setEstDraft] = useState("");
   const [focused, setFocused] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [overPos, setOverPos] = useState<"above" | "below" | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const remaining = tasks.filter((t) => !t.done).length;
@@ -601,6 +689,38 @@ function Column({ lane, label, tasks, selectedIndex, focusZone, pomoCmd, onAdd, 
               onToggle={() => onToggle(t.id)}
               onDelete={() => onDelete(t.id)}
               onSelect={() => onSelect(i)}
+              onToggleStep={(si) => onToggleStep(t.id, si)}
+              onAddStep={() => onAddStep(t.id)}
+              onRemoveStep={() => onRemoveStep(t.id)}
+              isDragging={dragIndex === i}
+              isDropTarget={overIndex === i && dragIndex !== null && dragIndex !== i}
+              dropPosition={overIndex === i ? overPos : null}
+              onDragStart={(e) => {
+                setDragIndex(i);
+                e.dataTransfer.effectAllowed = "move";
+                try { e.dataTransfer.setData("text/plain", String(i)); } catch (err) {}
+              }}
+              onDragOver={(e) => {
+                if (dragIndex === null) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                const pos: "above" | "below" = (e.clientY - rect.top) < rect.height / 2 ? "above" : "below";
+                setOverIndex(i);
+                setOverPos(pos);
+              }}
+              onDragLeave={() => {
+                if (overIndex === i) { setOverIndex(null); setOverPos(null); }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragIndex === null || dragIndex === i) { setDragIndex(null); setOverIndex(null); setOverPos(null); return; }
+                let to = i + (overPos === "below" ? 1 : 0);
+                if (dragIndex < to) to -= 1;
+                onReorder(dragIndex, to);
+                setDragIndex(null); setOverIndex(null); setOverPos(null);
+              }}
+              onDragEnd={() => { setDragIndex(null); setOverIndex(null); setOverPos(null); }}
             />
           ))
         )}
@@ -686,7 +806,13 @@ function App() {
   }, []);
 
   const toggleTask = useCallback((lane: Lane, id: string) => {
-    setters[lane]((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+    setters[lane]((prev) => prev.map((t) => {
+      if (t.id !== id) return t;
+      const nextDone = !t.done;
+      // if the task has sub-steps, mirror the main toggle onto all of them
+      const nextSteps = t.steps ? t.steps.map(() => nextDone) : t.steps;
+      return { ...t, done: nextDone, steps: nextSteps };
+    }));
   }, []);
 
   const deleteTask = useCallback((lane: Lane, id: string) => {
@@ -695,6 +821,45 @@ function App() {
     setTimeout(() => {
       setters[lane]((prev) => prev.filter((t) => t.id !== id));
     }, 250);
+  }, []);
+
+  const toggleStep = useCallback((lane: Lane, id: string, si: number) => {
+    setters[lane]((prev) => prev.map((t) => {
+      if (t.id !== id || !t.steps) return t;
+      const steps = t.steps.map((s, i) => (i === si ? !s : s));
+      const allDone = steps.length > 0 && steps.every(Boolean);
+      return { ...t, steps, done: allDone };
+    }));
+  }, []);
+
+  const addStep = useCallback((lane: Lane, id: string) => {
+    setters[lane]((prev) => prev.map((t) => {
+      if (t.id !== id) return t;
+      const steps = [...(t.steps || []), false];
+      // adding a new (incomplete) step means the task is no longer fully done
+      return { ...t, steps, done: false };
+    }));
+  }, []);
+
+  const removeStep = useCallback((lane: Lane, id: string) => {
+    setters[lane]((prev) => prev.map((t) => {
+      if (t.id !== id || !t.steps || t.steps.length === 0) return t;
+      const steps = t.steps.slice(0, -1);
+      const allDone = steps.length > 0 && steps.every(Boolean);
+      return { ...t, steps, done: steps.length === 0 ? t.done : allDone };
+    }));
+  }, []);
+
+  const reorderTask = useCallback((lane: Lane, from: number, to: number) => {
+    setters[lane]((prev) => {
+      if (from < 0 || from >= prev.length) return prev;
+      const clampedTo = Math.max(0, Math.min(prev.length - 1, to));
+      if (from === clampedTo) return prev;
+      const next = prev.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(clampedTo, 0, moved);
+      return next;
+    });
   }, []);
 
   const doReset = useCallback(() => {
@@ -837,6 +1002,10 @@ function App() {
       onDelete={(id) => deleteTask("pro", id)}
       onSelect={(i) => setSel({ lane: "pro", kind: "task", ti: i })}
       onSelectZone={(k) => setSel({ lane: "pro", kind: k, ti: 0 })}
+      onToggleStep={(id, si) => toggleStep("pro", id, si)}
+      onAddStep={(id) => addStep("pro", id)}
+      onRemoveStep={(id) => removeStep("pro", id)}
+      onReorder={(from, to) => reorderTask("pro", from, to)}
     />
   );
   const persoCol = (
@@ -850,6 +1019,10 @@ function App() {
       onDelete={(id) => deleteTask("perso", id)}
       onSelect={(i) => setSel({ lane: "perso", kind: "task", ti: i })}
       onSelectZone={(k) => setSel({ lane: "perso", kind: k, ti: 0 })}
+      onToggleStep={(id, si) => toggleStep("perso", id, si)}
+      onAddStep={(id) => addStep("perso", id)}
+      onRemoveStep={(id) => removeStep("perso", id)}
+      onReorder={(from, to) => reorderTask("perso", from, to)}
     />
   );
 
